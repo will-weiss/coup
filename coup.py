@@ -118,7 +118,6 @@ class Player:
         lost_role = random.choice(self.roles.keys())
         return self.lose_role(lost_role)
 
-
 class Game:
     def __init__(self, names):
         self.info = []
@@ -150,6 +149,14 @@ class Game:
     def log(self, msg):
         self.info.append(msg)
 
+    @property
+    def current_player(self):
+        return self.rotation[0]
+
+    @property
+    def other_players(self):
+        return list(itertools.islice(self.rotation, 1, len(self.rotation)))
+
     # True if the challengee has a required role
     def determine_challenge_result(self, roles, challengee, challenger):
         matching_roles = set(roles).intersection(challengee.roles)
@@ -178,22 +185,21 @@ class Game:
             player.exchange()
 
     def turn(self):
-        current_player = self.rotation[0]
-        (action, target) = current_player.choose_action_and_target()
+        (action, target) = self.current_player.choose_action_and_target()
         self._action = action
         resolve = True
         reaction = None
         response = None
-        for other_player in itertools.islice(self.rotation, 1, len(self.rotation)):
-            reaction = other_player.choose_reaction(current_player, action, target)
+        for other_player in self.other_players:
+            reaction = other_player.choose_reaction(self.current_player, action, target)
             if reaction is None:
                 continue
             elif reaction is 'challenge':
-                resolve = self.determine_challenge_result(set([action.specific_role]), current_player, other_player)
+                resolve = self.determine_challenge_result(set([action.specific_role]), self.current_player, other_player)
             elif reaction is 'counter':
-                response = current_player.choose_response(action, other_player, target)
+                response = self.current_player.choose_response(action, other_player, target)
                 if response is 'challenge':
-                    resolve = not self.determine_challenge_result(action.counter_roles, other_player, current_player)
+                    resolve = not self.determine_challenge_result(action.counter_roles, other_player, self.current_player)
                 else:
                     resolve = False
             if resolve:
@@ -201,14 +207,14 @@ class Game:
             break
 
         if resolve:
-            self.resolve_action(action, current_player, target)
+            self.resolve_action(action, self.current_player, target)
 
-        if not self.potentially_remove_player(current_player):
+        if not self.potentially_remove_player(self.current_player):
             self.rotation.rotate(-1)
 
         self.log({
             'turn_no'        : self.turn_no,
-            'current_player' : getName(current_player),
+            'current_player' : getName(self.current_player),
             'action'         : getName(action),
             'target'         : getName(target),
             'reaction'       : reaction,
@@ -221,50 +227,9 @@ class Game:
             self.turn()
         self.log("WINNER: {0}".format(self.rotation[0].name))
 
-game = Game(['will', 'mario', 'kim'])
+game = Game(['will', 'pat', 'frank'])
 
 game.play()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
