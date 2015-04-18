@@ -11,10 +11,6 @@ def getName(obj):
     except Exception:
         return None
 
-class PublicGame:
-    pass
-
-
 class Game:
     def __init__(self, names):
         self.info = []
@@ -38,14 +34,7 @@ class Game:
             for role in (action.counter_roles or []):
                 self.roles[role].counters[action_name] = action
         self.setup_rotation(names)
-        self.public = PublicGame()
-        self.public.info = self.info
-        self.public.roles = self.roles
-        self.public.actions = self.actions
-        self.public.deck = self.deck
-        self.players = dict((name, Player(name, self.public)) for name in names)
-        self.public.current_player = self.current_player_public
-        self.public.other_players = self.other_players_public
+        self.players = dict((name, Player(name, self)) for name in names)
 
     def setup_rotation(self, names):
         self.rotation = collections.deque(names, len(names))
@@ -58,20 +47,12 @@ class Game:
         return self.players[self.rotation[0]]
 
     @property
-    def current_player_public(self):
-        return self.current_player.public
-
-    @property
     def other_players(self):
         return [self.players[name] for name in itertools.islice(self.rotation, 1, len(self.rotation))]
 
-    @property
-    def other_players_public(self):
-        return [player.public for player in self.other_players]
-
     # True if the challengee has a required role
     def determine_challenge_result(self, roles, challengee, challenger):
-        matching_roles = set(roles).intersection(challengee.roles)
+        matching_roles = challengee.match_roles(set(roles))
         if len(matching_roles):
             challengee.choose_reveal(matching_roles)
             challenger.lose_influence()
@@ -80,11 +61,13 @@ class Game:
             challengee.lose_influence()
             return False
 
-    def potentially_remove_player(self, player):
-        if not player.lives_left:
-            self.setup_rotation([name for name in self.rotation if not name is player.name])
-            return True
-        return False
+    def trim_players(self):
+        names = { 'alive': [], 'dead': [] }
+        for name in self.rotation:
+            t = 'alive' if self.players[name].lives_left else 'dead'
+            names[t].append(name)
+        self.setup_rotation(names['alive'])
+        return names['dead']
 
     def resolve_action(self, action, player, target):
         player.coins += action.net_coins
@@ -92,40 +75,42 @@ class Game:
             target.coins -= action.target_coin_loss
             if action.target_influence_loss:
                 target.lose_influence()
-                self.potentially_remove_player(target)
+                self.trim_players()
         if action.role_exchange:
             player.exchange()
 
     def turn(self):
-        (action, target) = self.current_player.choose_action_and_target()
+        cp = self.current_player
+        (action, target) = cp.choose_action_and_target()
         resolve = True
         reaction = None
         response = None
         for other_player in self.other_players:
-            reaction = other_player.choose_reaction(self.current_player, action, target)
+            reaction = other_player.choose_reaction(cp, action, target)
             if reaction is None:
                 continue
             elif reaction is 'challenge':
-                resolve = self.determine_challenge_result(set([action.specific_role]), self.current_player, other_player)
+                resolve = self.determine_challenge_result(set([action.specific_role]), cp, other_player)
             elif reaction is 'counter':
-                response = self.current_player.choose_response(action, other_player, target)
+                response = cp.choose_response(action, other_player, target)
                 if response is 'challenge':
-                    resolve = not self.determine_challenge_result(action.counter_roles, other_player, self.current_player)
+                    resolve = not self.determine_challenge_result(action.counter_roles, other_player, cp)
                 else:
                     resolve = False
             if resolve:
-                self.potentially_remove_player(other_player)
+                self.trim_players()
             break
 
         if resolve:
-            self.resolve_action(action, self.current_player, target)
+            self.resolve_action(action, cp, target)
 
-        if not self.potentially_remove_player(self.current_player):
+        removed_players = self.trim_players()
+        if not cp in removed_players:
             self.rotation.rotate(-1)
 
         self.log({
             'turn_no'        : self.turn_no,
-            'current_player' : getName(self.current_player),
+            'current_player' : getName(cp),
             'action'         : getName(action),
             'target'         : getName(target),
             'reaction'       : reaction,
